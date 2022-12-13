@@ -1,0 +1,394 @@
+<project name="CampusFreezers" threads="1" pubsub="auto" heartbeat-interval="1">
+  <description><![CDATA[Read IoT event data from hub, filter, parse, convert to measures table.]]></description>
+  <metadata>
+    <meta id="studioUploadedBy">totuni</meta>
+    <meta id="studioUploaded">1659465067817</meta>
+    <meta id="studioModifiedBy">totuni</meta>
+    <meta id="studioModified">1659635419611</meta>
+    <meta id="layout">{"cq1":{"FilterandAppend":{"x":-50,"y":110},"Parse4messures":{"x":-210,"y":275},"ReadDeviceTable":{"x":80,"y":-70},"ReadEvents":{"x":-200,"y":-75},"deadletter":{"x":90,"y":275}}}</meta>
+    <meta id="studioTags">devicetable, eventhub, lua</meta>
+  </metadata>
+  <contqueries>
+    <contquery name="cq1">
+      <windows>
+        <window-source insert-only="true" autogen-key="true" index="pi_EMPTY" name="ReadEvents">
+          <schema>
+            <fields>
+              <field name="index" type="int64" key="true"/>
+              <field name="message" type="string"/>
+            </fields>
+          </schema>
+          <connectors>
+            <connector class="kafka" name="kafkain1" active="false">
+              <properties>
+                <property name="type"><![CDATA[pub]]></property>
+                <!-- <property name="kafkainitialoffset"><![CDATA[largest]]></property>  -->
+                <property name="kafkaglobalconfig"><![CDATA[security.protocol=SASL_SSL;sasl.username=$ConnectionString;sasl.password="Endpoint=sb://saslorahub.servicebus.windows.net/;SharedAccessKeyName=ESPListen;SharedAccessKey=cgyjWy4xu0XxxYMFcx32RdxhS17JHvLl8SyrdIWVi6U=;EntityPath=lorahub";sasl.mechanism=PLAIN;ssl.ca.location=/etc/pki/tls/cert.pem]]></property>
+                <property name="kafkaconsumergroupid"><![CDATA[lastread]]></property>
+                <!-- <property name="kafkapartition"><![CDATA[-1]]></property>  -->
+                <property name="kafkatype"><![CDATA[opaquestring]]></property>
+                <property name="urlhostport"><![CDATA[notusedwhennotHA]]></property>
+                <property name="kafkahostport"><![CDATA[saslorahub.servicebus.windows.net:9093]]></property>
+                <property name="kafkatopic"><![CDATA[lorahub]]></property>
+              </properties>
+            </connector>
+            <connector class="kafka" name="kafkainAll">
+              <properties>
+                <property name="type"><![CDATA[pub]]></property>
+                <property name="kafkainitialoffset"><![CDATA[smallest]]></property>
+                <property name="kafkaglobalconfig"><![CDATA[security.protocol=SASL_SSL;sasl.username=$ConnectionString;sasl.password="Endpoint=sb://saslorahub.servicebus.windows.net/;SharedAccessKeyName=ESPListen;SharedAccessKey=cgyjWy4xu0XxxYMFcx32RdxhS17JHvLl8SyrdIWVi6U=;EntityPath=lorahub";sasl.mechanism=PLAIN;ssl.ca.location=/etc/pki/tls/cert.pem]]></property>
+                <!-- <property name="kafkaconsumergroupid"><![CDATA[lastread]]></property> -->
+                <property name="kafkapartition"><![CDATA[-1]]></property>
+                <property name="kafkatype"><![CDATA[opaquestring]]></property>
+                <property name="urlhostport"><![CDATA[notusedwhennotHA]]></property>
+                <property name="kafkahostport"><![CDATA[saslorahub.servicebus.windows.net:9093]]></property>
+                <property name="kafkatopic"><![CDATA[lorahub]]></property>
+              </properties>
+            </connector>
+            <connector class="eventhubs" name="Eventhub1" active="false">
+              <properties>
+                <property name="type"><![CDATA[pub]]></property>
+                <property name="eventhubsincludeindex"><![CDATA[true]]></property>
+                <property name="eventhubsconnectionstring"><![CDATA[Endpoint=sb://saslorahub.servicebus.windows.net/;SharedAccessKeyName=ESPListen;SharedAccessKey=cgyjWy4xu0XxxYMFcx32RdxhS17JHvLl8SyrdIWVi6U=]]></property>
+                <property name="eventhubspath"><![CDATA[lorahub]]></property>
+                <property name="eventhubsconsumergroup"><![CDATA[$default]]></property>
+                <property name="eventhubspartition"><![CDATA[0]]></property>
+                <property name="eventhubsformat"><![CDATA[eventhubsjson]]></property>
+              </properties>
+            </connector>
+          </connectors>
+        </window-source>
+        <window-source index="pi_EMPTY" insert-only="true" autogen-key="true" name="ReadDeviceTable">
+          <schema>
+            <fields>
+              <field name="Index_ID" type="int64" key="true"/>
+              <field name="deviceid" type="string"/>
+              <field name="manufacturer" type="string"/>
+              <field name="partnumber" type="string"/>
+              <field name="name" type="string"/>
+              <field name="displayname" type="string"/>
+              <field name="address" type="string"/>
+              <field name="lat" type="double"/>
+              <field name="long" type="double"/>
+              <field name="altitude" type="double"/>
+              <field name="active" type="int64"/>
+              <field name="dateaquired" type="double"/>
+              <field name="installdate" type="double"/>
+            </fields>
+          </schema>
+          <connectors>
+            <connector class="fs" name="devicestable">
+              <properties>
+                <property name="type"><![CDATA[pub]]></property>
+                <property name="header"><![CDATA[1]]></property>
+                <property name="noautogenfield"><![CDATA[true]]></property>
+                <property name="addcsvopcode"><![CDATA[true]]></property>
+                <property name="addcsvflags"><![CDATA[normal]]></property>
+                <property name="fsname"><![CDATA[/export/sas-viya/data/Common/Tfreezers.csv]]></property>
+                <property name="fstype"><![CDATA[csv]]></property>
+              </properties>
+            </connector>
+          </connectors>
+        </window-source>
+        <window-lua events="create" index="pi_EMPTY" name="FilterandAppend">
+          <description><![CDATA[Filter non interesting events to the deadletter topic in Kafka and append device information from device table for sorting.]]></description>
+          <splitter-lua function="splitter">
+            <use><![CDATA[active]]></use>
+            <code><![CDATA[function splitter(data,context)
+    local slotnumber 
+    if data.active == 1 then slotnumber = 1  -- we found this device in the devicetable and it is active 
+    else slotnumber = 2 -- send to deadletter queue
+    end 
+    return(slotnumber)
+end]]></code>
+          </splitter-lua>
+          <schema>
+            <fields>
+              <field name="index" type="int64" key="true"/>
+              <field name="message" type="string"/>
+              <field name="deviceid" type="string"/>
+              <field name="manufacturer" type="string"/>
+              <field name="partnumber" type="string"/>
+              <field name="name" type="string"/>
+              <field name="displayname" type="string"/>
+              <field name="address" type="string"/>
+              <field name="active" type="int64"/>
+            </fields>
+          </schema>
+          <copy/>
+          <use><![CDATA[index,message,deviceid,manufacturer,partnumber,name,displayname,address,active]]></use>
+          <code><![CDATA[local devicetable = {}  -- store devicetable here
+
+-- Take each record from the devicetable and build an internal table keyed by deviceid
+local function builddevicetable(
+    d,     -- table which contains one row read in by source window
+    dt)    -- returns updated devicetable 
+  if d.deviceid then -- ignore if null 
+    dt[d.deviceid]={}  -- new tbl keyed by deviceid 
+    dt[d.deviceid]["manufacturer"]=d.manufacturer
+    dt[d.deviceid]["partnumber"]=d.partnumber
+    dt[d.deviceid]["name"]=d.name
+    dt[d.deviceid]["displayname"]=d.displayname
+    dt[d.deviceid]["address"]=d.address
+    dt[d.deviceid]["active"]=d.active
+  end     
+return (dt)
+end 
+function create(data,context)
+    local event = {}
+    if context.input == "ReadDeviceTable" then 
+        builddevicetable(data,devicetable)  
+        event = nil;
+    else         
+      local parsedmessage = parseJson(data.message)
+      
+      local d_eui = parsedmessage["device_eui"]
+      if d_eui then  -- found current dev in device table 
+        event.deviceid = d_eui
+        if devicetable[d_eui] then 
+          event.manufacturer= devicetable[d_eui]["manufacturer"]    
+          event.partnumber  = devicetable[d_eui]["partnumber"] 
+          event.name        = devicetable[d_eui]["name"]
+          event.displayname = devicetable[d_eui]["displayname"]
+          event.address     = devicetable[d_eui]["address"]
+          event.active      = devicetable[d_eui]["active"]
+        else event = nil;  -- filter non freezer events 
+        end 
+      end     
+      
+    end 
+ return(event)
+end]]></code>
+        </window-lua>
+        <window-functional index="pi_EMPTY" name="deadletter">
+          <schema>
+            <fields>
+              <field name="index" type="int64" key="true"/>
+              <field name="message" type="string"/>
+              <field name="deviceid" type="string"/>
+              <field name="manufacturer" type="string"/>
+              <field name="partnumber" type="string"/>
+              <field name="name" type="string"/>
+              <field name="displayname" type="string"/>
+              <field name="address" type="string"/>
+              <field name="active" type="int64"/>
+            </fields>
+          </schema>
+          <connectors>
+            <connector class="kafka" name="deadletter">
+              <properties>
+                <property name="type"><![CDATA[sub]]></property>
+                <property name="dateformat"><![CDATA['%Y-%m-%d %H:%M:%S]]></property>
+                <property name="hotfailover"><![CDATA[false]]></property>
+                <property name="kafkaglobalconfig"><![CDATA[enable.sparse.connections=false]]></property>
+                <property name="snapshot"><![CDATA[false]]></property>
+                <property name="kafkahostport"><![CDATA[viya-azure-1-nfs-vm:9092]]></property>
+                <property name="kafkapartition"><![CDATA[-1]]></property>
+                <property name="kafkatopic"><![CDATA[deadletter]]></property>
+                <property name="kafkatype"><![CDATA[json]]></property>
+                <property name="urlhostport"><![CDATA[na]]></property>
+                <property name="numbufferedmsgs"><![CDATA[1]]></property>
+              </properties>
+            </connector>
+          </connectors>
+        </window-functional>
+        <window-lua events="create" index="pi_EMPTY" name="Parse4messures">
+          <description><![CDATA[Parse device event into sensor events one value per sensor to create a measures FACT table entry.]]></description>
+          <schema>
+            <fields>
+              <field name="esp_index" type="string" key="true"/>
+              <field name="eventepoch" type="int64"/>
+              <field name="deviceid" type="string"/>
+              <field name="sensorid" type="string"/>
+              <field name="value" type="string"/>
+            </fields>
+          </schema>
+          <copy/>
+          <use><![CDATA[message,deviceid]]></use>
+          <code><![CDATA[local tttables  = require ("/export/sas-viya/lua/TTtables")  -- table helper functions
+local TTtbl = tttables:new()
+local ttstrings  = require ("/export/sas-viya/lua/TTstrings")  -- non OO helper functions
+local TTstr = ttstrings:new()
+local sensorstable = {}  -- store devicetable here
+
+-- take each record from the sensorstable and build an internal table keyed by sensorid
+local function buildsensorstable(
+    d)  -- table which contains one row read in by source window
+  -- returns updated sensorstable 
+  if d.sensorid then -- ignore if null 
+    sensorstable[d.sensorid]=true -- true or false table
+  else sensorstable[d.sensorid]=false
+  end     
+return 
+end 
+
+local function buildtblofnonpayloaditems(
+         mappings,   --  table which maps json field names to standard
+         jsontable,  --  subtable of json message
+         items,      --  list of things to find in table 
+         resultstable  -- returns updated table
+         )
+          
+          for k,v in pairs (items) do   -- 
+          
+            local results = TTtbl:find_value_by_key(jsontable, mappings[v]) -- find first occurence 
+            if results then -- found the item
+                if v == "eventepoch" then 
+                   if type(results) == "string" then  -- parse string into epoch 
+                      -- results = parseTime(results,"%Y-%m-%dT%H:%M:%S")   -- not available until SS5 or ASS1
+                      local epoch
+                      local timestable = {}
+                      local offset 
+                      epoch , timestable , offset = TTstr:rfc_3339(results, 0 )
+                      results = math.floor(epoch*1000000) -- needed for ESP Stamp data type
+                   else  -- number  like 1649282893.238888
+                      results = math.floor(results*1000000) -- needed for ESP Stamp data type
+                   end    
+                end    
+                if type(results) == "table" then 
+                    resultstable[v] = results["value"]   -- save in table 
+                else
+                    resultstable[v] = results   -- save in table 
+                end     
+            end 
+          
+          end 
+      return 
+      end 
+
+-- parse incoming messages from campus IoT hub into a tall structure 
+-- Outgoing message format: 
+--    epochtime,sensorid,deviceid,value    -- DIM fields as string values. to be determined 
+--    message spec provided by SEMtech 
+
+function create(data,context)
+    
+    local events = {}   -- events table
+    if context.input == "ReadSensorTable" then 
+        buildsensorstable(data)  
+        event = nil;
+    else  -- parse incoming event from campus IoT hub        
+      local parsedmessage = parseJson(data.message)   
+      
+      local fieldsmapping = {}  -- list of fields and their mappings
+      
+      -- root 
+      local rootitems = {"deviceid","version"}
+      fieldsmapping["deviceid"]="device_eui"
+      fieldsmapping["version"]="version"
+      -- data
+      local dataitems = {"eventepoch"}
+      fieldsmapping["eventepoch"]="rx_timestamp"
+      -- radio
+      local radioitems = {"f_counter","rssi","snr"}
+      fieldsmapping["f_counter"]="f_counter"
+      fieldsmapping["rssi"]="rssi"
+      fieldsmapping["snr"]="snr"
+      -- location 
+      local locationitems = {"altitude","latitude","longitude"}
+      fieldsmapping["altitude"]="altitude"
+      fieldsmapping["latitude"]="latitude"
+      fieldsmapping["longitude"]="longitude"
+      -- sensors   no mapping should be necessary 
+      
+      -- grab nonpayloadfields and store them
+      nonpayloadfields = {}
+      
+      -- grab root items 
+      buildtblofnonpayloaditems(fieldsmapping,parsedmessage,rootitems,nonpayloadfields)
+      
+      --  search data table for stuff 
+      local  tablereference = TTtbl:find_value_by_key(parsedmessage, "data")
+      if tablereference then 
+           buildtblofnonpayloaditems(fieldsmapping,tablereference,dataitems,nonpayloadfields)
+      end       
+      --  search radio table for stuff 
+      tablereference = TTtbl:find_value_by_key(parsedmessage, "radio")
+      if tablereference then 
+           buildtblofnonpayloaditems(fieldsmapping,tablereference,radioitems,nonpayloadfields)
+      end 
+      
+      
+      local nonpayloadFACTs = {"f_counter","rssi","snr"}
+      
+      -- create new events from nonpayloadFACTs
+      
+      local counter = 1 
+      for k,v in pairs (nonpayloadFACTs) do
+                
+        if nonpayloadfields[v] then  -- create a new messures FACT entry 
+            local   guids = getGuids(1)    
+            local e = {}
+            e.esp_index = guids[1]
+            e.value = tostring(nonpayloadfields[v])
+            e.eventepoch = nonpayloadfields["eventepoch"]
+            e.sensorid = v
+            e.deviceid = nonpayloadfields["deviceid"]
+            
+            events[counter]    = e  -- add new event to 
+            counter = counter + 1 
+        else -- print("value for key ", v , "not found ")    
+        end     
+            
+      end  -- for loop
+  
+      -- create events for payloads sensors and locations 
+      -- If these are hidden inside of a table such as sensors or payload etc.
+      -- We must create a special loop to deal with them.  
+      local payloadtablenames = {"sensors","locations"}
+      
+      local  sensorpayload = TTtbl:find_value_by_key(parsedmessage, "sensors")  -- find sensors table
+      if sensorpayload then  -- is their a sensors tbl in the json
+         for k,v in pairs (sensorpayload) do
+            local   guids = getGuids(1)    
+            local e = {}
+            e.esp_index = guids[1]
+            e.eventepoch = nonpayloadfields["eventepoch"]
+            e.deviceid = nonpayloadfields["deviceid"]
+            --  now for the payload fields 
+            e.sensorid = sensorpayload[k]["name"]
+            --  insert value 
+            if sensorpayload[k]["scale"] then   -- adjust value by scale factor 
+                e.value = tostring(sensorpayload[k]["value"] * (10 ^ sensorpayload[k]["scale"]))
+            else 
+                e.value = tostring(sensorpayload[k]["value"])
+            end 
+            
+            
+            events[counter]    = e  -- add new event to 
+            counter = counter + 1 
+         end -- loop thru sensors payload 
+      end 
+     
+    end 
+ return(events)
+end]]></code>
+          <connectors>
+            <connector class="kafka" name="CampusMeasuresFreezers">
+              <properties>
+                <property name="type"><![CDATA[sub]]></property>
+                <property name="dateformat"><![CDATA['%Y-%m-%d %H:%M:%S]]></property>
+                <property name="hotfailover"><![CDATA[false]]></property>
+                <property name="kafkaglobalconfig"><![CDATA[enable.sparse.connections=false]]></property>
+                <property name="doubleprecision"><![CDATA[6]]></property>
+                <property name="snapshot"><![CDATA[false]]></property>
+                <property name="kafkahostport"><![CDATA[viya-azure-1-nfs-vm:9092]]></property>
+                <property name="kafkapartition"><![CDATA[-1]]></property>
+                <property name="kafkatopic"><![CDATA[CMF]]></property>
+                <property name="kafkatype"><![CDATA[json]]></property>
+                <property name="urlhostport"><![CDATA[na]]></property>
+                <property name="numbufferedmsgs"><![CDATA[1]]></property>
+              </properties>
+            </connector>
+          </connectors>
+        </window-lua>
+      </windows>
+      <edges>
+        <edge source="ReadEvents" target="FilterandAppend"/>
+        <edge source="ReadDeviceTable" target="FilterandAppend"/>
+        <edge source="FilterandAppend" target="deadletter" slot="2"/>
+        <edge source="FilterandAppend" target="Parse4messures" slot="1"/>
+      </edges>
+    </contquery>
+  </contqueries>
+</project>
